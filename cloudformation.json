@@ -1,0 +1,176 @@
+{
+	"Parameters" : {
+  	"KeyName" : {
+  		"Description" : "The EC2 Key Pair to allow SSH access to the instance",
+  		"Type" : "AWS::EC2::KeyPair::KeyName"
+  	}
+	},
+
+	"Resources" : {
+		"ImageBucket" : {
+		  "Type" : "AWS::S3::Bucket",
+		  "Properties" : {
+		    "AccessControl" : "PublicRead",
+		    "BucketName" : "font-detective-image-bucket",
+		    "Tags" : [ {
+				  "Key" : "Project",
+				  "Value" : "fontdetective"
+				} ]
+		  }
+		},
+
+		"FontDectiveVPC" : {
+		   "Type" : "AWS::EC2::VPC",
+		   "Properties" : {
+		      "CidrBlock" : "10.0.0.0/16",
+		      "EnableDnsSupport" : true,
+		      "EnableDnsHostnames" : true,
+		      "Tags" : [ {
+					  "Key" : "Project",
+					  "Value" : "fontdetective"
+					} ]
+		   }
+		},
+
+		"InternetLoadBalancerSubnet" : {
+		   "Type" : "AWS::EC2::Subnet",
+		   "Properties" : {
+		      "AvailabilityZone" : "eu-west-1",
+		      "CidrBlock" : "10.0.0.0/24",
+		      "Tags" : [ {
+					  "Key" : "Project",
+					  "Value" : "fontdetective"
+					} ],
+		      "VpcId" : { "Ref" : "FontDectiveVPC" }
+		   }
+		},
+
+		"WebServerSubnet" : {
+		  "Type" : "AWS::EC2::Subnet",
+		  "Properties" : {
+	      "AvailabilityZone" : "eu-west-1",
+	      "CidrBlock" : "10.0.1.0/24",
+	      "Tags" : [ {
+				  "Key" : "Project",
+				  "Value" : "fontdetective"
+				} ],
+	      "VpcId" : { "Ref" : "FontDectiveVPC" }
+		  }
+		},
+
+		"WebServerSecurityGroup" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Direct connection via port 80, ProxyProtocol connection via port 8080, app served at port 3000",
+				"SecurityGroupIngress" : [ {
+					"IpProtocol" : "tcp",
+					"FromPort" : "22",
+					"ToPort" : "22",
+					"CidrIp" : "0.0.0.0/0"
+					},
+					{
+					"IpProtocol" : "http",
+					"FromPort" : "80",
+					"ToPort" : "80",
+					"CidrIp" : "0.0.0.0/0"
+					} ]
+			}
+		},
+
+		"InternetLoadBalancerSecurityGroup" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Connections to port 80 are routed using ProxyProtocol to WS",
+				"SecurityGroupIngress" : [ {
+					"IpProtocol" : "tcp",
+					"FromPort" : "22",
+					"ToPort" : "22",
+					"CidrIp" : "0.0.0.0/0"
+					},
+					{
+					"IpProtocol" : "http",
+					"FromPort" : "80",
+					"ToPort" : "80",
+					"CidrIp" : "0.0.0.0/0"
+					} ]
+			}
+		},
+
+		"InternetLoadBalancerHealthCheck" : {
+			"Type" : "AWS::Route53::HealthCheck",
+			"Properties" : {
+				"HealthyThreshold" : "3",
+				"Interval" : "60",
+				"Target" : "80",
+				"Timeout" : "20",
+				"UnhealthyThreshold" : "3"
+			}
+		},
+
+		"InternetLoadBalancer" : {
+		  "Type": "AWS::ElasticLoadBalancing::LoadBalancer",
+		  "Properties": {
+	      "CrossZone" : true,
+	      "HealthCheck" : { "Ref" : "InternetLoadBalancerHealthCheck" },
+	      "LBCookieStickinessPolicy" : [ {
+					"CookieExpirationPeriod" : "0",
+					"PolicyName" : "font-detective-internet-stickiness-policy"
+				} ],
+	      "LoadBalancerName" : "font-detective-internet-lb",
+	      "Listeners" : [ {
+					"InstancePort" : "8080",
+					"InstanceProtocol" : "http",
+					"LoadBalancerPort" : "80",
+					"PolicyNames" :  [ "font-detective-internet-http-listener" ],
+					"Protocol" : "http"
+				} ],
+	      "Policies" : [ {
+					"PolicyName" : "font-detective-internet-http-proxy-protocol",
+					"PolicyType" : "ProxyProtocolPolicyType",
+					"Attributes" : [{
+					  "Name"  : "ProxyProtocol",
+					  "Value" : "true"
+					}],
+					"InstancePorts" : ["8080"]
+				}],
+	      "SecurityGroups" : [ { "Ref" : "InternetLoadBalancerSecurityGroup" } ],
+	      "Subnets" : [ { "Ref" : "InternetLoadBalancerSubnet" } ],
+			  "Tags" : [ {
+				   "Key" : "Project",
+				   "Value" : "fontdetective"
+				} ]
+		  }
+		},
+
+		"WebServerLaunchConfig" : {
+		  "Type" : "AWS::AutoScaling::LaunchConfiguration",
+		  "Properties" : {
+		      "AssociatePublicIpAddress" : true,
+		      "ImageId" : "font-detective-ws-autostart",
+		      "InstanceType" : "t2.micro",
+		      "KeyName" : { "Ref" : "KeyName" },
+		      "SecurityGroups" : [ { "Ref" : "WebServerSecurityGroup" } ]
+		  }
+		},
+
+		"WebServerAutoScalingGroup" : {
+		  "Type" : "AWS::AutoScaling::AutoScalingGroup",
+		  "Properties" : {
+		      "AvailabilityZones" : [ "eu-west-1" ],
+		      "Cooldown" : "300",
+		      "DesiredCapacity" : "1",
+		      "HealthCheckGracePeriod" : 300,
+		      "HealthCheckType" : "ELB",
+		      "LaunchConfigurationName" : { "Ref" : "WebServerLaunchConfig" },
+		      "LoadBalancerNames" : [ { "Ref" : "InternetLoadBalancer" } ],
+		      "MaxSize" : "5",
+		      "MinSize" : "1",
+		      "Tags" : [ {
+					  "Key" : "Project",
+					  "Value" : "fontdetective"
+					} ],
+		      "VPCZoneIdentifier" : [ { "Ref" : "FontDectiveVPC" } ]
+		  }
+		}
+	}
+}
