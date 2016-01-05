@@ -150,7 +150,7 @@
     "WebServerLaunchConfig" : {
       "Type" : "AWS::AutoScaling::LaunchConfiguration",
       "Properties" : {
-          "AssociatePublicIpAddress" : true,
+
           "ImageId" : { "Ref" : "WsAmiParameter" },
           "InstanceType" : { "Ref" : "WsInstanceTypeParameter" },
           "KeyName" : { "Ref" : "KeyName" },
@@ -161,7 +161,7 @@
     "WebServerAutoScalingGroup" : {
       "Type" : "AWS::AutoScaling::AutoScalingGroup",
       "Properties" : {
-          "AvailabilityZones" : [ "eu-west-1a" ],
+          "AvailabilityZones" : { "Fn::GetAZs" : "eu-west-1" },
           "Cooldown" : "300",
           "DesiredCapacity" : "1",
           "HealthCheckGracePeriod" : 300,
@@ -174,8 +174,7 @@
             "Key" : "Project",
             "Value" : "fontdetective",
             "PropagateAtLaunch": true
-          } ],
-          "VPCZoneIdentifier" : [ { "Ref" : "VpcId" } ]
+          } ]
       }
     }
   }
